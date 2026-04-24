@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile containing roles and basic info.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["restaurant", "ngo"] },
+        "name": { "type": "string" },
+        "location": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "name"]
+    },
+    "FoodPost": {
+      "title": "FoodPost",
+      "description": "A post listing surplus food available for donation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "restaurantId": { "type": "string" },
+        "restaurantName": { "type": "string" },
+        "foodName": { "type": "string" },
+        "quantity": { "type": "string" },
+        "location": { "type": "string" },
+        "expiryTime": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["available", "requested", "completed"] }
+      },
+      "required": ["id", "restaurantId", "foodName", "quantity", "status"]
+    },
+    "FoodRequest": {
+      "title": "FoodRequest",
+      "description": "A request from an NGO for a specific food post.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "foodPostId": { "type": "string" },
+        "ngoId": { "type": "string" },
+        "ngoName": { "type": "string" },
+        "restaurantId": { "type": "string" },
+        "pickupMethod": { "type": "string", "enum": ["pickup", "delivery"] },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected", "collected", "delivered"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "foodPostId", "ngoId", "restaurantId", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles"
+    },
+    "/food_posts/{postId}": {
+      "schema": "FoodPost",
+      "description": "Surplus food listings"
+    },
+    "/requests/{requestId}": {
+      "schema": "FoodRequest",
+      "description": "Donation requests"
+    }
+  }
+}

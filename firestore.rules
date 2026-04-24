@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net - Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitives & Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // 1. User Profiles
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['uid', 'email', 'role', 'name', 'createdAt']) &&
+               data.uid == userId &&
+               data.role in ['restaurant', 'ngo'] &&
+               data.email is string && data.email.size() <= 200 &&
+               data.name is string && data.name.size() <= 100;
+      }
+      
+      // Allow any signed-in user to read profiles (needed for cross-referencing names/roles)
+      allow get: if isSignedIn();
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && incoming().createdAt == request.time;
+      allow update: if isOwner(userId) && isValidId(userId) && 
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'location', 'updatedAt']) &&
+                    incoming().uid == existing().uid &&
+                    incoming().email == existing().email &&
+                    incoming().role == existing().role;
+    }
+
+    // 2. Food Posts - Pillar 8: Secure List Queries
+    match /food_posts/{postId} {
+      function isValidPost(data) {
+        return data.keys().hasAll(['restaurantId', 'foodName', 'quantity', 'status', 'createdAt']) &&
+               data.restaurantId is string && data.restaurantId.size() <= 128 &&
+               data.foodName is string && data.foodName.size() <= 200 &&
+               data.quantity is string && data.quantity.size() <= 100 &&
+               data.status in ['available', 'requested', 'completed'];
+      }
+      
+      // Pillar 8: Rule enforces query boundaries.
+      allow list: if isSignedIn() && (
+        resource.data.status == 'available' || 
+        resource.data.restaurantId == request.auth.uid
+      );
+      allow get: if isSignedIn() && isValidId(postId);
+      
+      allow create: if isSignedIn() && isValidId(postId) && isValidPost(incoming()) && 
+                    incoming().restaurantId == request.auth.uid &&
+                    incoming().createdAt == request.time &&
+                    incoming().status == 'available';
+                    
+      allow update: if isSignedIn() && isValidId(postId) && (
+        // Action: Restaurant edit
+        (isOwner(existing().restaurantId) && incoming().diff(existing()).affectedKeys().hasAny(['foodName', 'quantity', 'status']) && isValidPost(incoming())) ||
+        // Action: NGO reservation (Pillar 4: Tiered Identity Logic)
+        (incoming().diff(existing()).affectedKeys().hasOnly(['status']) && 
+         existing().status == 'available' && incoming().status == 'requested')
+      );
+      allow delete: if isOwner(existing().restaurantId) && isValidId(postId);
+    }
+
+    // 3. Requests - Pillar 1: Master Gate (Relational Sync)
+    match /requests/{requestId} {
+      function isValidRequest(data) {
+        return data.keys().hasAll(['foodPostId', 'ngoId', 'restaurantId', 'status', 'createdAt']) &&
+               data.ngoId == request.auth.uid &&
+               data.status in ['pending', 'accepted', 'rejected', 'collected', 'delivered'];
+      }
+
+      // Pillar 8: Secure queries
+      allow list: if isSignedIn() && (resource.data.ngoId == request.auth.uid || resource.data.restaurantId == request.auth.uid);
+      allow get: if isSignedIn() && isValidId(requestId) && (resource.data.ngoId == request.auth.uid || resource.data.restaurantId == request.auth.uid);
+      
+      allow create: if isSignedIn() && isValidId(requestId) && isValidRequest(incoming()) &&
+                    // Relational verify (Pillar 1 & 8)
+                    exists(/databases/$(database)/documents/food_posts/$(incoming().foodPostId));
+                    
+      allow update: if isSignedIn() && isValidId(requestId) && (
+        // Action: Restaurant Accept/Reject
+        (isOwner(existing().restaurantId) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) && 
+         incoming().status in ['accepted', 'rejected'] && incoming().updatedAt == request.time) ||
+        // Action: NGO Collected/Delivered
+        (isOwner(existing().ngoId) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) && 
+         incoming().status in ['collected', 'delivered'] && incoming().updatedAt == request.time)
+      );
+    }
+  }
+}
